@@ -2,24 +2,35 @@ pipeline {
     agent any
 
     environment {
-        ANSIBLE_PLAYBOOK = 'ansible-playbook.yaml'
+        DOCKER_HUB_CREDENTIALS = credentials('docker-hub-repo') 
+        ANSIBLE_PLAYBOOK = 'ansible-playbook.yaml' 
     }
 
     stages {
         stage('Checkout') {
             steps {
-                checkout scm  // Checkout the repository with the playbook
-                 sh "git clone https://github.com/aaabaza761/wen-nginx-localhost.git "
+                checkout scm
             }
         }
 
-        stage('Run Ansible Playbook for Kubernetes') {
+        stage('Add EC2 Host to Known Hosts') {
             steps {
-                script {
-                    // Run the Ansible playbook to deploy on the Kubernetes cluster
-                    sh """
-                    ansible-playbook -i localhost  ${ANSIBLE_PLAYBOOK} "
-                    """
+                sshagent(['ec2-server-key']) {
+                    sh "ssh-keyscan -H 3.84.10.182 >> ~/.ssh/known_hosts"
+                }
+            }
+        }
+
+        stage('Run Ansible Playbook') {
+            steps {
+                sshagent(['ec2-server-key']) {
+                    script {
+                        withCredentials([usernamePassword(credentialsId: 'docker-hub-repo', usernameVariable: 'dockerhub_username', passwordVariable: 'dockerhub_password')]) {
+                            sh """
+                            ansible-playbook -i inventory ${ANSIBLE_PLAYBOOK} --extra-vars "@vars.yaml"
+                            """
+                        }
+                    }
                 }
             }
         }
@@ -27,9 +38,8 @@ pipeline {
 
     post {
         always {
-            // Clean up unused Docker images to save space
             script {
-                      sh "docker image prune -f"
+                sh "docker image prune -f"
             }
         }
     }
